@@ -4,14 +4,22 @@
 
 **Give your AI agent access to Ed Discussion.**
 
-Let it catch up on the forum, search threads, read lessons, download slides and attachments, and post when you ask. The same commands work for you in a terminal and for scripts in a pipe.
+Let it catch up on the forum, search threads, read lessons, download slides and attachments, and post when you ask. One package, three ways in: a CLI, a local MCP server, and a hosted **remote MCP server** for Claude, ChatGPT and other web AI.
 
 [![npm version](https://img.shields.io/npm/v/edstem-cli?logo=npm)](https://www.npmjs.com/package/edstem-cli)
 [![CI](https://github.com/bunizao/edstem-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/bunizao/edstem-cli/actions/workflows/ci.yml)
 [![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> The live layer of [unicorn](https://unicorn.tuuhub.com): live tools answer what is there now, unicorn answers what changed. Docs: [unicorn.tuuhub.com/docs/edstem](https://unicorn.tuuhub.com/docs/edstem).
+> 🦄 **Part of [unicorn](https://unicorn.tuuhub.com).** Live tools answer what is there now; unicorn answers what changed.
+>
+> 📖 **[Read the docs → unicorn.tuuhub.com/docs/edstem](https://unicorn.tuuhub.com/docs/edstem)**
+
+| Use it from | How |
+| --- | --- |
+| Claude, ChatGPT or any web AI | Add `https://edstem.tuuhub.com/mcp` as a custom connector ([remote MCP](#remote-mcp)) |
+| Claude Code, Codex or another local agent | `edstem-mcp` ([local MCP](#local-mcp)) or the CLI plus its [agent skill](#agent-skill) |
+| Your terminal and scripts | `npm install -g edstem-cli` ([quick start](#quick-start)) |
 
 ## Quick start
 
@@ -22,13 +30,13 @@ edstem units
 edstem threads UNIT --unread --limit 20
 ```
 
-`edstem auth login` opens the Ed token page for you. To connect an AI client instead of using the terminal, see [MCP servers](#mcp-servers).
+`edstem auth login` opens the Ed token page for you and works out your Ed region.
 
 ## Quick links
 
 - [Install and sign in](#install-and-sign-in)
 - [Study Boooooooooost](#study-boooooooooost)
-- [MCP servers](#mcp-servers)
+- [Remote and local MCP](#mcp-servers)
 - [Developer and agent reference](#for-developers-and-agents)
 
 ## Install and sign in
@@ -49,21 +57,13 @@ edstem auth login
 edstem auth status
 ```
 
-Login opens [edstem.org/settings/api-tokens](https://edstem.org/settings/api-tokens) in your browser, reads the token without echoing it, works out which Ed region accepts it, and saves both to `~/.config/edstem-cli/token` (mode `0600`). The CLI and `edstem-mcp` then use the saved region automatically.
-
-| Region | Token page | API endpoint |
-| --- | --- | --- |
-| `au` | [edstem.org](https://edstem.org/settings/api-tokens) | `https://edstem.org/api/` |
-| `us` | [us.edstem.org](https://us.edstem.org/settings/api-tokens) | `https://us.edstem.org/api/` |
-| `eu` | [eu.edstem.org](https://eu.edstem.org/settings/api-tokens) | `https://eu.edstem.org/api/` |
-
-If verification fails in a terminal, login lets you retry, enter another token, pick another region, or cancel without touching saved credentials.
+Login opens Ed's API token page in your browser, reads the token without echoing it, and finds which Ed site accepts it (`edstem.org`, `us.edstem.org` or `eu.edstem.org`). It saves both to `~/.config/edstem-cli/token` (mode `0600`), and the CLI and `edstem-mcp` use them from then on. If verification fails, login lets you retry, enter another token, pick another region, or cancel without touching saved credentials.
 
 For scripts and CI, skip the file:
 
 ```bash
 export EDSTEM_TOKEN="your-token"
-export EDSTEM_REGION="us"   # au (default), us, or eu
+export EDSTEM_REGION="us"   # au (edstem.org, default), us, or eu
 
 # Or save it non-interactively
 printf '%s\n' "your-token" | edstem auth login --region us --token-stdin
@@ -179,11 +179,13 @@ The body is Markdown (headings, code, bold, italic, links, lists). With no body 
 
 ## MCP servers
 
-### Hosted server
+### Remote MCP
 
-`https://edstem.tuuhub.com/mcp` is a Streamable HTTP server with OAuth. Add it as a custom connector in Claude, ChatGPT or any remote-MCP client; see the [MCP docs](https://unicorn.tuuhub.com/docs/mcp) for client-specific steps.
+`https://edstem.tuuhub.com/mcp` is a hosted Streamable HTTP server with OAuth. Add it as a custom connector in Claude, ChatGPT or any client that speaks remote MCP, then sign in with your Ed token. Client-by-client steps: [unicorn.tuuhub.com/docs/mcp](https://unicorn.tuuhub.com/docs/mcp).
 
-### Local server
+Prefer your own server? [Deploy your own Worker](#deploy-your-own-worker).
+
+### Local MCP
 
 `edstem-mcp` uses the same saved token and region as the CLI:
 
@@ -255,7 +257,7 @@ npx skills add https://github.com/bunizao/edstem-cli
 | Variable | Purpose |
 | --- | --- |
 | `EDSTEM_TOKEN` | Ed API token; overrides the saved one. |
-| `EDSTEM_REGION` | `au`, `us` or `eu`; overrides the saved region. Defaults to `au`. |
+| `EDSTEM_REGION` | `au` (edstem.org), `us` or `eu`; overrides the saved region. Defaults to `au`. |
 | `EDSTEM_BASE_URL` | Override the Ed API endpoint. |
 | `EDSTEM_CONFIG` | Use another config file instead of `~/.config/edstem-cli/config.yaml`. |
 | `EDSTEM_ALLOW_POSTING` | `1` enables posting tools in `edstem-mcp`. |
@@ -273,21 +275,20 @@ npm run build
 npm run pack:check
 ```
 
-The shared CLI contract comes from [`@bunizao/cli-kit`](https://github.com/bunizao/cli-kit).
-
-## Part of unicorn
+## 🦄 Part of unicorn
 
 unicorn is one project in two layers. The live tools answer what is there now; unicorn answers what changed.
 
-| Project | Layer | What it does | Repo |
-| --- | --- | --- | --- |
-| unicorn | Memory | A Cloudflare Worker on your own account. Reads Moodle, Ed, Canvas, Gmail and feeds every hour, remembers what each said, and tells your AI agent what changed. | [TuuHub/unicorn](https://github.com/TuuHub/unicorn) |
-| moodle-cli | Live | Moodle from the terminal and MCP: units, deadlines, grades, forums, files, submissions. | [bunizao/moodle-cli](https://github.com/bunizao/moodle-cli) |
-| **edstem-cli** (you are here) | **Live** | **Ed Discussion from the terminal and MCP: units, threads, lessons, files, posting.** | [bunizao/edstem-cli](https://github.com/bunizao/edstem-cli) |
-| ontrack | Live | OnTrack / Doubtfire from the terminal: units, tasks, chats, submissions. CLI only, no MCP server. | [bunizao/ontrack-cli](https://github.com/bunizao/ontrack-cli) |
+| Project | Layer | What it does |
+| --- | --- | --- |
+| [🦄 unicorn](https://github.com/TuuHub/unicorn) | Memory | A Cloudflare Worker on your own account. Reads Moodle, Ed, Canvas, Gmail and feeds every hour, remembers what each said, and tells your AI agent what changed. Remote MCP. |
+| [moodle-cli](https://github.com/bunizao/moodle-cli) | Live | Moodle: units, deadlines, grades, forums, files, submissions. CLI, local and remote MCP. |
+| **[edstem-cli](https://github.com/bunizao/edstem-cli)** (you are here) | **Live** | **Ed Discussion: units, threads, lessons, files, posting. CLI, local and remote MCP.** |
+| [ontrack](https://github.com/bunizao/ontrack-cli) | Live | OnTrack / Doubtfire: units, tasks, chats, submissions. CLI only. |
 
-The three live tools share one command contract through [@bunizao/cli-kit](https://github.com/bunizao/cli-kit).
-Docs for everything: [unicorn.tuuhub.com/docs](https://unicorn.tuuhub.com/docs). This project: [unicorn.tuuhub.com/docs/edstem](https://unicorn.tuuhub.com/docs/edstem). CLIs overview: [unicorn.tuuhub.com/cli](https://unicorn.tuuhub.com/cli).
+The three CLIs share one command contract through [@bunizao/cli-kit](https://github.com/bunizao/cli-kit).
+
+📖 **Docs:** [this project](https://unicorn.tuuhub.com/docs/edstem) · [all projects](https://unicorn.tuuhub.com/docs) · [CLIs overview](https://unicorn.tuuhub.com/cli) · [MCP clients](https://unicorn.tuuhub.com/docs/mcp)
 
 ## License
 
