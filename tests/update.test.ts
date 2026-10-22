@@ -4,6 +4,7 @@ import type { CliRuntime } from "../src/cli.js";
 import { run } from "../src/cli.js";
 import type { FetchLike } from "../src/ed/client.js";
 import { checkForUpdate, compareVersions } from "../src/update.js";
+import { VERSION } from "../src/version.js";
 
 const spawnSync = vi.hoisted(() => vi.fn());
 vi.mock("node:child_process", () => ({ spawnSync }));
@@ -46,7 +47,7 @@ describe("update checks", () => {
     const fetch: FetchLike = async () => new Response(JSON.stringify({ version: "0.9.0" }), { status: 200 });
 
     await expect(checkForUpdate(fetch)).resolves.toMatchObject({
-      currentVersion: "0.8.0",
+      currentVersion: VERSION,
       latestVersion: "0.9.0",
       updateAvailable: true,
       upgradeCommand: "npm install -g edstem-cli@latest",
@@ -61,7 +62,7 @@ describe("edstem update", () => {
     expect(await run(["node", "edstem", "update", "--check", "--json"], runtime)).toBe(0);
 
     expect(JSON.parse(stdout.join(""))).toEqual({
-      currentVersion: "0.8.0",
+      currentVersion: VERSION,
       latestVersion: "9.9.9",
       updateAvailable: true,
       upgradeCommand: "npm install -g edstem-cli@latest",
@@ -85,7 +86,7 @@ describe("edstem update", () => {
     try {
       expect(await run(["node", "edstem", "update", "--dry-run"], runtime)).toBe(0);
       expect(write.mock.calls.join("")).toContain(
-        "Upgrade edstem-cli from 0.8.0 to 9.9.9 with `npm install -g edstem-cli@latest`."
+        `Upgrade edstem-cli from ${VERSION} to 9.9.9 with \`npm install -g edstem-cli@latest\`.`
       );
     } finally {
       write.mockRestore();
