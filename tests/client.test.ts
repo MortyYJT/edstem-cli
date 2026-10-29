@@ -356,7 +356,7 @@ describe("EdClient lesson results", () => {
     const fetch = vi.fn<FetchLike>().mockResolvedValue(jsonResponse({
       attempts: [
         { id: 31, lesson_id: 7001, user_id: 12345, submitted_at: "2026-03-01T10:00:00.123456+11:00" },
-        { id: 32, lesson_id: 7001, user_id: 12345, submitted_at: "2026-03-02T10:00:00+11:00" },
+        { id: 32, lesson_id: 7001, mark_override: 6, user_id: 12345, submitted_at: "2026-03-02T10:00:00+11:00" },
       ],
       final_id: 32,
     }));
@@ -367,8 +367,8 @@ describe("EdClient lesson results", () => {
     expect(String(fetch.mock.calls[0]?.[0])).toBe("https://ed.example/api/lessons/7001/attempts/12345");
     expect(result).toEqual({
       attempts: [
-        { id: 31, lessonId: 7001, submittedAt: "2026-03-01T10:00:00.123456+11:00", userId: 12345 },
-        { id: 32, lessonId: 7001, submittedAt: "2026-03-02T10:00:00+11:00", userId: 12345 },
+        { id: 31, lessonId: 7001, markOverride: null, submittedAt: "2026-03-01T10:00:00.123456+11:00", userId: 12345 },
+        { id: 32, lessonId: 7001, markOverride: 6, submittedAt: "2026-03-02T10:00:00+11:00", userId: 12345 },
       ],
       finalId: 32,
     });

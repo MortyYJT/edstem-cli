@@ -107,6 +107,8 @@ export interface LessonAttempt {
   lessonId: number;
   userId: number;
   submittedAt: string;
+  /** A staff-set final mark that replaces the calculated one; may be zero. */
+  markOverride: number | null;
 }
 
 export interface LessonAttempts {

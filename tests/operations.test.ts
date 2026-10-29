@@ -272,7 +272,7 @@ describe("resolveCourseId", () => {
 });
 
 describe("getLessonScores", () => {
-  const attempt = { id: 32, lessonId: 7001, submittedAt: "2026-03-02T10:00:00+11:00", userId: 12345 };
+  const attempt = { id: 32, lessonId: 7001, markOverride: null, submittedAt: "2026-03-02T10:00:00+11:00", userId: 12345 };
 
   function makeScoreClient(overrides: Partial<Record<keyof EdClient, unknown>> = {}): EdClient {
     return {
@@ -371,6 +371,47 @@ describe("getLessonScores", () => {
 
     await expect(getLessonScores(client, [7001])).resolves.toEqual([
       expect.objectContaining({ maxScore: null, score: 7.5, status: "graded" }),
+    ]);
+  });
+
+  it("reports a staff override, including zero, in place of the calculated mark", async () => {
+    for (const markOverride of [9, 0]) {
+      const client = makeScoreClient({
+        fetchLessonAttempts: vi.fn().mockResolvedValue({ attempts: [{ ...attempt, markOverride }], finalId: 32 }),
+      });
+
+      await expect(getLessonScores(client, [7001])).resolves.toEqual([
+        expect.objectContaining({ maxScore: 10, score: markOverride, status: "graded" }),
+      ]);
+    }
+  });
+
+  it("reports an override even when Ed has no calculated mark", async () => {
+    const client = makeScoreClient({
+      fetchLessonAttempts: vi.fn().mockResolvedValue({ attempts: [{ ...attempt, markOverride: 9 }], finalId: 32 }),
+      fetchLessonMarkingStatus: vi.fn().mockResolvedValue({
+        mark: null,
+        slideTotals: [10],
+        unmarkedUserIds: [12345],
+        userId: 12345,
+      }),
+    });
+
+    await expect(getLessonScores(client, [7001])).resolves.toEqual([
+      expect.objectContaining({ score: 9, status: "graded" }),
+    ]);
+  });
+
+  it("keeps an override hidden until results are released", async () => {
+    const client = makeScoreClient({
+      fetchLessonAttempts: vi.fn().mockResolvedValue({ attempts: [{ ...attempt, markOverride: 9 }], finalId: 32 }),
+      fetchLessonMarkingStatus: vi.fn().mockRejectedValue(
+        new EdApiError("api", 403, "Results are not released", "results_unreleased")
+      ),
+    });
+
+    await expect(getLessonScores(client, [7001])).resolves.toEqual([
+      expect.objectContaining({ score: null, status: "unreleased" }),
     ]);
   });
 

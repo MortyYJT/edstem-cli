@@ -643,6 +643,7 @@ function parseLessonAttempt(data: Record<string, unknown>): LessonAttempt {
   return {
     id: asInt(data.id),
     lessonId: asInt(data.lesson_id),
+    markOverride: asFiniteNumber(data.mark_override),
     submittedAt: asString(data.submitted_at),
     userId: asInt(data.user_id)
   };

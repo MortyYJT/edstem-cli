@@ -485,9 +485,11 @@ async function getLessonScore(client: EdClient, lessonId: number, userId: number
   if (marking.userId !== userId) {
     throw new EdApiError("upstream", 0, `Ed returned a result for lesson ${lessonId} that does not belong to you.`);
   }
-  if (marking.unmarkedUserIds.includes(userId) || marking.mark === null) {
+  // Ed's web client shows the attempt's override in place of the calculated mark.
+  const score = final.markOverride ?? marking.mark;
+  if (score === null || (final.markOverride === null && marking.unmarkedUserIds.includes(userId))) {
     return { ...submitted, status: "unmarked" };
   }
   const maxScore = marking.slideTotals.reduce((sum, total) => sum + total, 0);
-  return { ...submitted, maxScore: maxScore > 0 ? maxScore : null, score: marking.mark, status: "graded" };
+  return { ...submitted, maxScore: maxScore > 0 ? maxScore : null, score, status: "graded" };
 }
