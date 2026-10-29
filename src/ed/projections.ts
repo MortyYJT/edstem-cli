@@ -5,6 +5,7 @@ import type {
   LessonModule,
   LessonQuestion,
   LessonQuestionResponse,
+  LessonScore,
   LessonSlide,
   Thread,
   ThreadMetrics,
@@ -85,6 +86,15 @@ export function projectLessonDetail(lesson: Lesson): JsonObject {
   if (lesson.slides.length > 0) {
     result.slides = lesson.slides.map((slide) => projectSlide(slide, { omitParents: true }));
   }
+  return result;
+}
+
+// An allowlist: Ed's result also names the student and lists other unmarked users.
+export function projectLessonScore(score: LessonScore): JsonObject {
+  const result: JsonObject = { lessonId: score.lessonId, status: score.status };
+  setNonEmpty(result, "score", score.score);
+  setNonEmpty(result, "maxScore", score.maxScore);
+  setNonEmpty(result, "submittedAt", normalizeTimestamp(score.submittedAt));
   return result;
 }
 

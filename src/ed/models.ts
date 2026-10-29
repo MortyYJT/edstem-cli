@@ -102,6 +102,38 @@ export interface LessonQuestionResponse {
   data: unknown;
 }
 
+export interface LessonAttempt {
+  id: number;
+  lessonId: number;
+  userId: number;
+  submittedAt: string;
+}
+
+export interface LessonAttempts {
+  attempts: LessonAttempt[];
+  /** The attempt Ed marks, or null when nothing was submitted. */
+  finalId: number | null;
+}
+
+export interface LessonMarkingStatus {
+  userId: number;
+  mark: number | null;
+  /** Maximum points per markable slide; empty when Ed's totals are missing or unreadable. */
+  slideTotals: number[];
+  /** Everyone still unmarked; only used to check the requesting user. */
+  unmarkedUserIds: number[];
+}
+
+export type LessonScoreStatus = "graded" | "unmarked" | "unreleased" | "not_submitted";
+
+export interface LessonScore {
+  lessonId: number;
+  status: LessonScoreStatus;
+  score: number | null;
+  maxScore: number | null;
+  submittedAt: string;
+}
+
 export interface ThreadMetrics {
   voteCount: number;
   viewCount: number;

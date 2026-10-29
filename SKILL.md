@@ -30,6 +30,7 @@ user for numeric ids when a code or a `UNIT#N` thread number will do.
 | my posts / did anyone reply to me | `edstem activity [UNIT]` |  |
 | which lessons, weeks or modules exist / what's unfinished | `edstem lessons UNIT` | then `--status unattempted` or `--module <text>` |
 | what's in a lesson / the slides | `edstem lessons show <lesson id>` | lesson id from `edstem lessons UNIT` |
+| my mark / score for an assessed lesson | `edstem lessons score <lesson id...>` | own final submission only; `unreleased` until staff release marks |
 | download the slides / files | `edstem files get <lesson id> --dest DIR` | `files list` first to see what exists |
 | quiz questions / what did I answer | `edstem slides show <slide id> --section questions` | `--section responses` for saved answers |
 | mark lessons as read or complete (only when asked) | `edstem lessons mark-read UNIT [words...] --dry-run` | then repeat with `--yes` |
@@ -101,10 +102,11 @@ credentials or the endpoint, without printing their values.
 | edstem threads send | Post a new thread in a unit. | <unit> | --title <title><br>--body <markdown><br>--body-file <path><br>--type <type><br>-c, --category <category><br>--private<br>--anonymous | yes |
 | edstem replies | Post replies to Ed threads. |  |  | no |
 | edstem replies send | Post a reply to a thread or to one of its comments. | <reference> | --body <markdown><br>--body-file <path><br>--as <kind><br>--to <commentId><br>--private<br>--anonymous | yes |
-| edstem lessons | List, show, read, or mark lessons as read. |  |  | no |
+| edstem lessons | List, show, or read lessons, check your scores, or mark lessons as read. |  |  | no |
 | edstem lessons list | List lessons in a unit. | <unit> | --module <module><br>--type <type><br>--state <state><br>--status <status> | no |
 | edstem lessons show | Show one lesson and its slides. | <lesson> |  | no |
 | edstem lessons read | Read a lesson and its slides as Markdown. | <lesson> |  | no |
+| edstem lessons score | Show your own final-submission score for lessons. Read-only. | <lessons...> |  | no |
 | edstem lessons mark-read | Mark matching lessons and slides as read. | <unit> [queries...] | --all<br>--delay <seconds> | yes |
 | edstem slides | Show, read, or submit lesson slides. |  |  | no |
 | edstem slides show | Show slide content, questions, responses, or quiz context. | <slide> | --section <section> | no |

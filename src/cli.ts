@@ -49,6 +49,7 @@ import {
   assertCommentInThread,
   defaultReplyType,
   listCurrentActivity,
+  getLessonScores,
   listLessons,
   listThreads,
   parseSinceValue,
@@ -64,6 +65,7 @@ import {
   projectCourse,
   projectIdentity,
   projectLessonDetail,
+  projectLessonScore,
   projectLessonSummary,
   projectQuestion,
   projectQuestionResponse,
@@ -134,7 +136,7 @@ const NOUNS: readonly NounSpec[] = [
   },
   {
     name: "lessons",
-    verbs: ["list", "show", "read", "mark-read"],
+    verbs: ["list", "show", "read", "score", "mark-read"],
     defaultByArity: { 0: "list", 1: "list" },
     valueFlags: ["--module", "--type", "--state", "--status", "--delay"],
   },
@@ -499,7 +501,7 @@ export function createProgram(runtime?: CliRuntime, ui: Ui = createUi({ interact
       }
     )));
 
-  const lessons = program.command("lessons").description("List, show, read, or mark lessons as read.");
+  const lessons = program.command("lessons").description("List, show, or read lessons, check your scores, or mark lessons as read.");
   lessons.command("list")
     .description("List lessons in a unit.")
     .argument("<unit>", "Unit ID or code", unitIdentifier)
@@ -527,6 +529,12 @@ export function createProgram(runtime?: CliRuntime, ui: Ui = createUi({ interact
     .argument("<lesson>", "Lesson ID", positiveInteger("<lesson>"))
     .action(textAction(runtime, async (client, _command, lesson: number) =>
       lessonToMarkdown(await client.fetchLesson(lesson))
+    ));
+  lessons.command("score")
+    .description("Show your own final-submission score for lessons. Read-only.")
+    .argument("<lessons...>", "Lesson IDs", positiveIntegers("<lessons...>"))
+    .action(outputAction(runtime, async (client, _command, lessonIds: number[]) =>
+      (await getLessonScores(client, lessonIds)).map(projectLessonScore)
     ));
   mutating(lessons.command("mark-read")
     .description("Mark matching lessons and slides as read.")
@@ -1123,6 +1131,12 @@ function positiveInteger(name: string): (value: string) => number {
     }
     return parsed;
   };
+}
+
+// Commander folds each variadic value into the previous result.
+function positiveIntegers(name: string): (value: string, previous?: number[]) => number[] {
+  const parse = positiveInteger(name);
+  return (value, previous = []) => [...previous, parse(value)];
 }
 
 export function parseFileTarget(value: string): FileTarget {

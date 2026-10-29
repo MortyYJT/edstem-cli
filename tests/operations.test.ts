@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-import type { EdClient } from "../src/ed/client.js";
+import { EdApiError, type EdClient } from "../src/ed/client.js";
 import type { Lesson, Thread } from "../src/ed/models.js";
-import { listLessons, listThreads, resolveCourseId } from "../src/ed/operations.js";
+import { getLessonScores, listLessons, listThreads, resolveCourseId } from "../src/ed/operations.js";
 import { makeThread } from "./support/threads.js";
 
 function makeLesson(overrides: Partial<Lesson>): Lesson {
@@ -268,5 +268,134 @@ describe("resolveCourseId", () => {
       "100 (CS101, 2026, Semester 1, active), 101 (CS101, 2025, Semester 1, archived). " +
       "Use a unit ID."
     );
+  });
+});
+
+describe("getLessonScores", () => {
+  const attempt = { id: 32, lessonId: 7001, submittedAt: "2026-03-02T10:00:00+11:00", userId: 12345 };
+
+  function makeScoreClient(overrides: Partial<Record<keyof EdClient, unknown>> = {}): EdClient {
+    return {
+      fetchUser: vi.fn().mockResolvedValue({ courses: [], user: { id: 12345 } }),
+      fetchLessonAttempts: vi.fn().mockResolvedValue({ attempts: [attempt], finalId: 32 }),
+      fetchLessonMarkingStatus: vi.fn().mockResolvedValue({
+        mark: 7.5,
+        slideTotals: [4, 6],
+        unmarkedUserIds: [999],
+        userId: 12345,
+      }),
+      ...overrides,
+    } as unknown as EdClient;
+  }
+
+  it("reports a released mark against the lesson's total", async () => {
+    const client = makeScoreClient();
+
+    await expect(getLessonScores(client, [7001])).resolves.toEqual([{
+      lessonId: 7001,
+      maxScore: 10,
+      score: 7.5,
+      status: "graded",
+      submittedAt: "2026-03-02T10:00:00+11:00",
+    }]);
+    expect(client.fetchLessonAttempts).toHaveBeenCalledWith(7001, 12345);
+    expect(client.fetchLessonMarkingStatus).toHaveBeenCalledWith(7001, 32);
+  });
+
+  it("stops at a lesson without a final submission", async () => {
+    const client = makeScoreClient({
+      fetchLessonAttempts: vi.fn().mockResolvedValue({ attempts: [], finalId: null }),
+    });
+
+    await expect(getLessonScores(client, [7001])).resolves.toEqual([{
+      lessonId: 7001,
+      maxScore: null,
+      score: null,
+      status: "not_submitted",
+      submittedAt: "",
+    }]);
+    expect(client.fetchLessonMarkingStatus).not.toHaveBeenCalled();
+  });
+
+  it("reports results Ed has not released", async () => {
+    const client = makeScoreClient({
+      fetchLessonMarkingStatus: vi.fn().mockRejectedValue(
+        new EdApiError("api", 403, "Results are not released", "results_unreleased")
+      ),
+    });
+
+    await expect(getLessonScores(client, [7001])).resolves.toEqual([
+      expect.objectContaining({ score: null, status: "unreleased", submittedAt: attempt.submittedAt }),
+    ]);
+  });
+
+  it("withholds a mark while the user is still unmarked", async () => {
+    const client = makeScoreClient({
+      fetchLessonMarkingStatus: vi.fn().mockResolvedValue({
+        mark: 0,
+        slideTotals: [4, 6],
+        unmarkedUserIds: [12345],
+        userId: 12345,
+      }),
+    });
+
+    await expect(getLessonScores(client, [7001])).resolves.toEqual([
+      expect.objectContaining({ maxScore: null, score: null, status: "unmarked" }),
+    ]);
+  });
+
+  it("treats a missing mark as unmarked", async () => {
+    const client = makeScoreClient({
+      fetchLessonMarkingStatus: vi.fn().mockResolvedValue({
+        mark: null,
+        slideTotals: [10],
+        unmarkedUserIds: [],
+        userId: 12345,
+      }),
+    });
+
+    await expect(getLessonScores(client, [7001])).resolves.toEqual([
+      expect.objectContaining({ score: null, status: "unmarked" }),
+    ]);
+  });
+
+  it("omits the maximum when Ed's totals are unknown", async () => {
+    const client = makeScoreClient({
+      fetchLessonMarkingStatus: vi.fn().mockResolvedValue({
+        mark: 7.5,
+        slideTotals: [],
+        unmarkedUserIds: [],
+        userId: 12345,
+      }),
+    });
+
+    await expect(getLessonScores(client, [7001])).resolves.toEqual([
+      expect.objectContaining({ maxScore: null, score: 7.5, status: "graded" }),
+    ]);
+  });
+
+  it("keeps other API errors", async () => {
+    const client = makeScoreClient({
+      fetchLessonMarkingStatus: vi.fn().mockRejectedValue(new EdApiError("api", 403, "Forbidden", "forbidden")),
+    });
+
+    await expect(getLessonScores(client, [7001])).rejects.toThrow("Forbidden");
+  });
+
+  it("rejects a final submission or result that belongs to someone else", async () => {
+    const foreignAttempt = makeScoreClient({
+      fetchLessonAttempts: vi.fn().mockResolvedValue({ attempts: [{ ...attempt, userId: 999 }], finalId: 32 }),
+    });
+    await expect(getLessonScores(foreignAttempt, [7001])).rejects.toThrow("does not belong to you");
+
+    const foreignResult = makeScoreClient({
+      fetchLessonMarkingStatus: vi.fn().mockResolvedValue({
+        mark: 7.5,
+        slideTotals: [10],
+        unmarkedUserIds: [],
+        userId: 999,
+      }),
+    });
+    await expect(getLessonScores(foreignResult, [7001])).rejects.toThrow("does not belong to you");
   });
 });

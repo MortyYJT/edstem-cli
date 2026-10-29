@@ -1,4 +1,4 @@
-import type { EdClient } from "./client.js";
+import { EdApiError, type EdClient } from "./client.js";
 import {
   filterThreads,
   hasThreadFilters,
@@ -6,7 +6,7 @@ import {
   parseSince,
   type ThreadFilterOptions,
 } from "./filter.js";
-import type { Comment, Course, Lesson, Thread } from "./models.js";
+import type { Comment, Course, Lesson, LessonScore, Thread } from "./models.js";
 
 /** Hard cap on Ed requests per filtered thread listing. */
 const THREAD_PAGE_CAP = 10;
@@ -446,4 +446,48 @@ function assertNonNegative(value: number, label: string): void {
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+/**
+ * Read the signed-in user's own final-submission result for each lesson. Read-only:
+ * it never starts, saves, or submits an attempt.
+ */
+export async function getLessonScores(client: EdClient, lessonIds: number[]): Promise<LessonScore[]> {
+  const { user } = await client.fetchUser();
+  const scores: LessonScore[] = [];
+  for (const lessonId of lessonIds) {
+    scores.push(await getLessonScore(client, lessonId, user.id));
+  }
+  return scores;
+}
+
+async function getLessonScore(client: EdClient, lessonId: number, userId: number): Promise<LessonScore> {
+  const empty = { lessonId, maxScore: null, score: null, submittedAt: "" };
+  const { attempts, finalId } = await client.fetchLessonAttempts(lessonId, userId);
+  if (finalId === null) return { ...empty, status: "not_submitted" };
+
+  const final = attempts.find((attempt) => attempt.id === finalId);
+  if (!final || final.userId !== userId) {
+    throw new EdApiError("upstream", 0, `Ed returned a final submission for lesson ${lessonId} that does not belong to you.`);
+  }
+  const submitted = { ...empty, submittedAt: final.submittedAt };
+
+  let marking;
+  try {
+    marking = await client.fetchLessonMarkingStatus(lessonId, finalId);
+  } catch (error) {
+    // Ed answers 403 results_unreleased until staff release marks for the lesson.
+    if (error instanceof EdApiError && error.code === "results_unreleased") {
+      return { ...submitted, status: "unreleased" };
+    }
+    throw error;
+  }
+  if (marking.userId !== userId) {
+    throw new EdApiError("upstream", 0, `Ed returned a result for lesson ${lessonId} that does not belong to you.`);
+  }
+  if (marking.unmarkedUserIds.includes(userId) || marking.mark === null) {
+    return { ...submitted, status: "unmarked" };
+  }
+  const maxScore = marking.slideTotals.reduce((sum, total) => sum + total, 0);
+  return { ...submitted, maxScore: maxScore > 0 ? maxScore : null, score: marking.mark, status: "graded" };
 }

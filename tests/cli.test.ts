@@ -511,6 +511,39 @@ describe("CLI", () => {
     ]);
   });
 
+  it("shows only the user's own lesson scores, read-only", async () => {
+    const { fetch, runtime, stdout } = makeRuntime(200, false, fixture("user_info"), {}, {
+      "/api/lessons/7001/attempts/12345": {
+        attempts: [{ id: 32, lesson_id: 7001, user_id: 12345, submitted_at: "2026-03-02T10:00:00.5+11:00" }],
+        final_id: 32,
+      },
+      "/api/lessons/7001/marking_status": {
+        attempt_result: { email: "alice@university.edu", mark: 7.5, name: "Alice Example", user_id: 12345 },
+        lesson_markable_marking_status: [{ unmarked_user_ids: [999] }],
+        slide_totals: { 10: 4, 11: 6 },
+      },
+      "/api/lessons/7002/attempts/12345": { attempts: [], final_id: null },
+    });
+
+    expect(await run(["node", "edstem", "lessons", "score", "7001", "7002", "--json"], runtime)).toBe(0);
+
+    expect(JSON.parse(stdout.join(""))).toEqual([
+      { lessonId: 7001, maxScore: 10, score: 7.5, status: "graded", submittedAt: "2026-03-02T10:00:00+11:00" },
+      { lessonId: 7002, status: "not_submitted" },
+    ]);
+    expect(stdout.join("")).not.toMatch(/alice|999/i);
+    expect(fetch.mock.calls.every((call) => (call[1]?.method ?? "GET") === "GET")).toBe(true);
+  });
+
+  it("requires positive lesson IDs for scores", async () => {
+    const { runtime, stderr } = makeRuntime();
+
+    expect(await run(["node", "edstem", "lessons", "score", "7001", "abc", "--json"], runtime)).toBe(2);
+    expect(JSON.parse(stderr.join(""))).toMatchObject({
+      error: { code: "usage", message: "<lessons...> must be a positive integer." },
+    });
+  });
+
   it("rejects ambiguous course codes before a progress mutation", async () => {
     const { fetch, runtime, stderr } = makeRuntime(200, false, duplicateCourseIdentity());
 
