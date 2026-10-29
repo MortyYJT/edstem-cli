@@ -126,14 +126,18 @@ export interface LessonMarkingStatus {
   unmarkedUserIds: number[];
 }
 
-export type LessonScoreStatus = "graded" | "unmarked" | "unreleased" | "not_submitted";
+export type GradeStatus = "graded" | "ungraded" | "unreleased" | "not_submitted" | "unavailable";
 
-export interface LessonScore {
+export interface Grade {
   lessonId: number;
-  status: LessonScoreStatus;
-  score: number | null;
-  maxScore: number | null;
+  title: string;
+  status: GradeStatus;
+  grade: number | null;
+  /** Derived: the sum of Ed's slide totals for the lesson. */
+  max: number | null;
   submittedAt: string;
+  /** Why Ed could not report this lesson, when status is unavailable. */
+  error?: string;
 }
 
 export interface ThreadMetrics {

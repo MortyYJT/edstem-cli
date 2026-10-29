@@ -1,4 +1,4 @@
-import { EdApiError, type EdClient } from "./client.js";
+import { EdApiError, EdAuthExpiredError, type EdClient } from "./client.js";
 import {
   filterThreads,
   hasThreadFilters,
@@ -6,7 +6,7 @@ import {
   parseSince,
   type ThreadFilterOptions,
 } from "./filter.js";
-import type { Comment, Course, Lesson, LessonScore, Thread } from "./models.js";
+import type { Comment, Course, Grade, Lesson, Thread } from "./models.js";
 
 /** Hard cap on Ed requests per filtered thread listing. */
 const THREAD_PAGE_CAP = 10;
@@ -373,10 +373,8 @@ export async function readLessons(
       "Give at least one query, or ask for all lessons, to mark lessons as read."
     );
   }
-  const lessons = (await listLessons(client, courseId)).filter((lesson) => {
-    const haystack = `${lesson.title} ${lesson.moduleName}`.toLowerCase();
-    return normalizedQueries.every((query) => haystack.includes(query));
-  });
+  const lessons = (await listLessons(client, courseId))
+    .filter((lesson) => matchesLessonQueries(lesson, normalizedQueries));
 
   const results: LessonReadResult[] = [];
   for (const lesson of lessons) {
@@ -448,29 +446,56 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-/**
- * Read the signed-in user's own final-submission result for each lesson. Read-only:
- * it never starts, saves, or submits an attempt.
- */
-export async function getLessonScores(client: EdClient, lessonIds: number[]): Promise<LessonScore[]> {
-  const { user } = await client.fetchUser();
-  const scores: LessonScore[] = [];
-  for (const lessonId of lessonIds) {
-    scores.push(await getLessonScore(client, lessonId, user.id));
-  }
-  return scores;
+function matchesLessonQueries(lesson: Lesson, normalizedQueries: string[]): boolean {
+  const haystack = `${lesson.title} ${lesson.moduleName}`.toLowerCase();
+  return normalizedQueries.every((query) => haystack.includes(query));
 }
 
-async function getLessonScore(client: EdClient, lessonId: number, userId: number): Promise<LessonScore> {
-  const empty = { lessonId, maxScore: null, score: null, submittedAt: "" };
+/**
+ * List the signed-in user's own grades for a unit's submission lessons that match every
+ * query. Read-only: it never starts, saves, or submits an attempt.
+ */
+export async function listGrades(
+  client: EdClient,
+  courseId: CourseReference,
+  queries: string[]
+): Promise<Grade[]> {
+  const normalizedQueries = queries.map((query) => query.trim().toLowerCase()).filter(Boolean);
+  // Only "attempt" lessons take submissions; content lessons would cost two empty requests each.
+  const lessons = (await listLessons(client, courseId))
+    .filter((lesson) => lesson.kind === "attempt" && matchesLessonQueries(lesson, normalizedQueries));
+  if (lessons.length === 0) return [];
+
+  const { user } = await client.fetchUser();
+  const grades: Grade[] = [];
+  for (const lesson of lessons) {
+    const empty = { grade: null, lessonId: lesson.id, max: null, submittedAt: "", title: lesson.title };
+    try {
+      grades.push({ ...empty, ...await getGrade(client, lesson.id, user.id) });
+    } catch (error) {
+      // A rejected token or a lost connection fails every lesson, so stop instead.
+      if (error instanceof EdAuthExpiredError || (error instanceof EdApiError && error.kind === "network")) {
+        throw error;
+      }
+      grades.push({ ...empty, error: error instanceof Error ? error.message : String(error), status: "unavailable" });
+    }
+  }
+  return grades;
+}
+
+async function getGrade(
+  client: EdClient,
+  lessonId: number,
+  userId: number
+): Promise<Pick<Grade, "status"> & Partial<Grade>> {
   const { attempts, finalId } = await client.fetchLessonAttempts(lessonId, userId);
-  if (finalId === null) return { ...empty, status: "not_submitted" };
+  if (finalId === null) return { status: "not_submitted" };
 
   const final = attempts.find((attempt) => attempt.id === finalId);
   if (!final || final.userId !== userId) {
-    throw new EdApiError("upstream", 0, `Ed returned a final submission for lesson ${lessonId} that does not belong to you.`);
+    throw new Error(`Ed returned a final submission for lesson ${lessonId} that does not belong to you.`);
   }
-  const submitted = { ...empty, submittedAt: final.submittedAt };
+  const submittedAt = final.submittedAt;
 
   let marking;
   try {
@@ -478,18 +503,18 @@ async function getLessonScore(client: EdClient, lessonId: number, userId: number
   } catch (error) {
     // Ed answers 403 results_unreleased until staff release marks for the lesson.
     if (error instanceof EdApiError && error.code === "results_unreleased") {
-      return { ...submitted, status: "unreleased" };
+      return { status: "unreleased", submittedAt };
     }
     throw error;
   }
   if (marking.userId !== userId) {
-    throw new EdApiError("upstream", 0, `Ed returned a result for lesson ${lessonId} that does not belong to you.`);
+    throw new Error(`Ed returned a result for lesson ${lessonId} that does not belong to you.`);
   }
   // Ed's web client shows the attempt's override in place of the calculated mark.
-  const score = final.markOverride ?? marking.mark;
-  if (score === null || (final.markOverride === null && marking.unmarkedUserIds.includes(userId))) {
-    return { ...submitted, status: "unmarked" };
+  const grade = final.markOverride ?? marking.mark;
+  if (grade === null || (final.markOverride === null && marking.unmarkedUserIds.includes(userId))) {
+    return { status: "ungraded", submittedAt };
   }
-  const maxScore = marking.slideTotals.reduce((sum, total) => sum + total, 0);
-  return { ...submitted, maxScore: maxScore > 0 ? maxScore : null, score, status: "graded" };
+  const max = marking.slideTotals.reduce((sum, total) => sum + total, 0);
+  return { grade, max: max > 0 ? max : null, status: "graded", submittedAt };
 }

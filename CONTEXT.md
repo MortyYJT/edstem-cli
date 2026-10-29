@@ -44,11 +44,12 @@ _Avoid_: Notification, feed item
 The Ed Identity's viewed or completed state for a Lesson and its Slides.
 _Avoid_: Read receipt, completion record
 
-**Lesson Score**:
-The Ed Identity's mark on their final submission to an assessed Lesson, against
-the Lesson's maximum. Ed withholds it until staff release results, and it never
-includes other users' marks.
-_Avoid_: Grade, result
+**Grade**:
+The Ed Identity's released result for their final submission to a Lesson that
+takes submissions. A staff override replaces the calculated result. Its maximum
+is derived: the sum of the Lesson's slide totals. Ed withholds it until staff
+release results, and it never includes other users' Grades.
+_Avoid_: Score, Mark
 
 **Thread State**:
 The Ed Identity's starred, watched, voted, and seen state for a Thread. Watch can

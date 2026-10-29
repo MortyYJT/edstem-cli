@@ -511,8 +511,16 @@ describe("CLI", () => {
     ]);
   });
 
-  it("shows only the user's own lesson scores, read-only", async () => {
+  it("lists only the user's own grades for a unit, read-only", async () => {
     const { fetch, runtime, stdout } = makeRuntime(200, false, fixture("user_info"), {}, {
+      "/api/courses/100/lessons": {
+        lessons: [
+          { course_id: 100, id: 7001, kind: "attempt", module_id: 1, title: "Assignment 1", type: "general" },
+          { course_id: 100, id: 7002, kind: "attempt", module_id: 1, title: "Assignment 2", type: "general" },
+          { course_id: 100, id: 7003, kind: "content", module_id: 1, title: "Workshop", type: "general" },
+        ],
+        modules: [{ course_id: 100, id: 1, name: "Week 1" }],
+      },
       "/api/lessons/7001/attempts/12345": {
         attempts: [{ id: 32, lesson_id: 7001, user_id: 12345, submitted_at: "2026-03-02T10:00:00.5+11:00" }],
         final_id: 32,
@@ -525,23 +533,79 @@ describe("CLI", () => {
       "/api/lessons/7002/attempts/12345": { attempts: [], final_id: null },
     });
 
-    expect(await run(["node", "edstem", "lessons", "score", "7001", "7002", "--json"], runtime)).toBe(0);
+    expect(await run(["node", "edstem", "grades", "100", "--json"], runtime)).toBe(0);
 
     expect(JSON.parse(stdout.join(""))).toEqual([
-      { lessonId: 7001, maxScore: 10, score: 7.5, status: "graded", submittedAt: "2026-03-02T10:00:00+11:00" },
-      { lessonId: 7002, status: "not_submitted" },
+      { grade: 7.5, lessonId: 7001, max: 10, status: "graded", submittedAt: "2026-03-02T10:00:00+11:00", title: "Assignment 1" },
+      { lessonId: 7002, status: "not_submitted", title: "Assignment 2" },
     ]);
     expect(stdout.join("")).not.toMatch(/alice|999/i);
     expect(fetch.mock.calls.every((call) => (call[1]?.method ?? "GET") === "GET")).toBe(true);
+    expect(fetch.mock.calls.map((call) => new URL(String(call[0])).pathname)).not.toContain("/api/lessons/7003/attempts/12345");
   });
 
-  it("requires positive lesson IDs for scores", async () => {
-    const { runtime, stderr } = makeRuntime();
+  it("accepts any number of query words without the list verb", async () => {
+    const { runtime, stdout } = makeRuntime();
 
-    expect(await run(["node", "edstem", "lessons", "score", "7001", "abc", "--json"], runtime)).toBe(2);
-    expect(JSON.parse(stderr.join(""))).toMatchObject({
-      error: { code: "usage", message: "<lessons...> must be a positive integer." },
+    expect(await run(["node", "edstem", "grades", "100", "a", "b", "c", "d", "e", "f", "g", "--json"], runtime)).toBe(0);
+    expect(JSON.parse(stdout.join(""))).toEqual([]);
+  });
+
+  it("colours the grade statuses outside the shared vocabulary", async () => {
+    vi.stubEnv("FORCE_COLOR", "1");
+    vi.stubEnv("NO_COLOR", "");
+    try {
+      const { fetch, runtime, stdout } = makeRuntime(200, true, fixture("user_info"), {}, {
+        "/api/courses/100/lessons": {
+          lessons: [
+            { course_id: 100, id: 7001, kind: "attempt", module_id: 1, title: "Assignment 1", type: "general" },
+            { course_id: 100, id: 7002, kind: "attempt", module_id: 1, title: "Assignment 2", type: "general" },
+          ],
+          modules: [{ course_id: 100, id: 1, name: "Week 1" }],
+        },
+        "/api/lessons/7001/attempts/12345": {
+          attempts: [{ id: 32, lesson_id: 7001, user_id: 12345, submitted_at: "2026-03-02T10:00:00+11:00" }],
+          final_id: 32,
+        },
+        "/api/lessons/7002/attempts/12345": {
+          attempts: [{ id: 33, lesson_id: 7002, user_id: 999, submitted_at: "2026-03-02T10:00:00+11:00" }],
+          final_id: 33,
+        },
+      });
+      const respond = fetch.getMockImplementation();
+      fetch.mockImplementation(async (input, init) =>
+        new URL(String(input)).pathname === "/api/lessons/7001/marking_status"
+          ? new Response(JSON.stringify({ code: "results_unreleased", message: "Results are not released" }), { status: 403 })
+          : respond!(input, init)
+      );
+
+      expect(await run(["node", "edstem", "grades", "100", "--table"], runtime)).toBe(0);
+
+      const table = stdout.join("");
+      expect(table).toContain("\u001b[33munreleased");
+      expect(table).toContain("\u001b[31munavailable");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("narrows grades to lessons matching every query word", async () => {
+    const { runtime, stdout } = makeRuntime(200, false, fixture("user_info"), {}, {
+      "/api/courses/100/lessons": {
+        lessons: [
+          { course_id: 100, id: 7001, kind: "attempt", module_id: 1, title: "Assignment 1", type: "general" },
+          { course_id: 100, id: 7002, kind: "attempt", module_id: 1, title: "Assignment 2", type: "general" },
+        ],
+        modules: [{ course_id: 100, id: 1, name: "Week 1" }],
+      },
+      "/api/lessons/7002/attempts/12345": { attempts: [], final_id: null },
     });
+
+    expect(await run(["node", "edstem", "grades", "100", "assignment", "2", "--json"], runtime)).toBe(0);
+
+    expect(JSON.parse(stdout.join(""))).toEqual([
+      { lessonId: 7002, status: "not_submitted", title: "Assignment 2" },
+    ]);
   });
 
   it("rejects ambiguous course codes before a progress mutation", async () => {

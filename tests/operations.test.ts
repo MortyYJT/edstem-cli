@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { EdApiError, type EdClient } from "../src/ed/client.js";
+import { EdApiError, EdAuthExpiredError, type EdClient } from "../src/ed/client.js";
 import type { Lesson, Thread } from "../src/ed/models.js";
-import { getLessonScores, listLessons, listThreads, resolveCourseId } from "../src/ed/operations.js";
+import { listGrades, listLessons, listThreads, resolveCourseId } from "../src/ed/operations.js";
 import { makeThread } from "./support/threads.js";
 
 function makeLesson(overrides: Partial<Lesson>): Lesson {
@@ -271,12 +271,20 @@ describe("resolveCourseId", () => {
   });
 });
 
-describe("getLessonScores", () => {
+describe("listGrades", () => {
   const attempt = { id: 32, lessonId: 7001, markOverride: null, submittedAt: "2026-03-02T10:00:00+11:00", userId: 12345 };
+  const assignment = makeLesson({ id: 7001, kind: "attempt", moduleName: "Assessments", title: "Assignment 1" });
 
-  function makeScoreClient(overrides: Partial<Record<keyof EdClient, unknown>> = {}): EdClient {
+  function makeGradeClient(
+    overrides: Partial<Record<keyof EdClient, unknown>> = {},
+    lessons: Lesson[] = [assignment]
+  ): EdClient {
     return {
-      fetchUser: vi.fn().mockResolvedValue({ courses: [], user: { id: 12345 } }),
+      fetchUser: vi.fn().mockResolvedValue({
+        courses: [{ id: 100, code: "CS101", name: "Systems", session: "Semester 1", status: "active", year: "2026" }],
+        user: { id: 12345 },
+      }),
+      fetchLessons: vi.fn().mockResolvedValue({ lessons, modules: [] }),
       fetchLessonAttempts: vi.fn().mockResolvedValue({ attempts: [attempt], finalId: 32 }),
       fetchLessonMarkingStatus: vi.fn().mockResolvedValue({
         mark: 7.5,
@@ -288,49 +296,65 @@ describe("getLessonScores", () => {
     } as unknown as EdClient;
   }
 
-  it("reports a released mark against the lesson's total", async () => {
-    const client = makeScoreClient();
+  it("reports a released grade against the lesson's total", async () => {
+    const client = makeGradeClient();
 
-    await expect(getLessonScores(client, [7001])).resolves.toEqual([{
+    await expect(listGrades(client, "CS101", [])).resolves.toEqual([{
+      grade: 7.5,
       lessonId: 7001,
-      maxScore: 10,
-      score: 7.5,
+      max: 10,
       status: "graded",
       submittedAt: "2026-03-02T10:00:00+11:00",
+      title: "Assignment 1",
     }]);
+    expect(client.fetchLessons).toHaveBeenCalledWith(100);
     expect(client.fetchLessonAttempts).toHaveBeenCalledWith(7001, 12345);
     expect(client.fetchLessonMarkingStatus).toHaveBeenCalledWith(7001, 32);
   });
 
+  it("only asks Ed about submission lessons that match every query", async () => {
+    const client = makeGradeClient({}, [
+      assignment,
+      makeLesson({ id: 7002, kind: "attempt", moduleName: "Assessments", title: "Assignment 2" }),
+      makeLesson({ id: 7003, kind: "content", moduleName: "Week 1", title: "Assignment 1 walkthrough" }),
+    ]);
+
+    const grades = await listGrades(client, 100, ["assessments", "1"]);
+
+    expect(grades.map((grade) => grade.lessonId)).toEqual([7001]);
+    expect(client.fetchLessonAttempts).toHaveBeenCalledOnce();
+  });
+
   it("stops at a lesson without a final submission", async () => {
-    const client = makeScoreClient({
+    const client = makeGradeClient({
       fetchLessonAttempts: vi.fn().mockResolvedValue({ attempts: [], finalId: null }),
     });
 
-    await expect(getLessonScores(client, [7001])).resolves.toEqual([{
+    await expect(listGrades(client, 100, [])).resolves.toEqual([{
+      grade: null,
       lessonId: 7001,
-      maxScore: null,
-      score: null,
+      max: null,
       status: "not_submitted",
       submittedAt: "",
+      title: "Assignment 1",
     }]);
     expect(client.fetchLessonMarkingStatus).not.toHaveBeenCalled();
   });
 
   it("reports results Ed has not released", async () => {
-    const client = makeScoreClient({
+    const client = makeGradeClient({
       fetchLessonMarkingStatus: vi.fn().mockRejectedValue(
         new EdApiError("api", 403, "Results are not released", "results_unreleased")
       ),
     });
 
-    await expect(getLessonScores(client, [7001])).resolves.toEqual([
-      expect.objectContaining({ score: null, status: "unreleased", submittedAt: attempt.submittedAt }),
+    await expect(listGrades(client, 100, [])).resolves.toEqual([
+      expect.objectContaining({ grade: null, status: "unreleased", submittedAt: attempt.submittedAt }),
     ]);
   });
 
-  it("withholds a mark while the user is still unmarked", async () => {
-    const client = makeScoreClient({
+  it("withholds a grade while the user is still ungraded", async () => {
+    const client = makeGradeClient({
       fetchLessonMarkingStatus: vi.fn().mockResolvedValue({
         mark: 0,
         slideTotals: [4, 6],
@@ -339,13 +363,13 @@ describe("getLessonScores", () => {
       }),
     });
 
-    await expect(getLessonScores(client, [7001])).resolves.toEqual([
-      expect.objectContaining({ maxScore: null, score: null, status: "unmarked" }),
+    await expect(listGrades(client, 100, [])).resolves.toEqual([
+      expect.objectContaining({ grade: null, max: null, status: "ungraded" }),
     ]);
   });
 
-  it("treats a missing mark as unmarked", async () => {
-    const client = makeScoreClient({
+  it("treats a missing mark as ungraded", async () => {
+    const client = makeGradeClient({
       fetchLessonMarkingStatus: vi.fn().mockResolvedValue({
         mark: null,
         slideTotals: [10],
@@ -354,13 +378,13 @@ describe("getLessonScores", () => {
       }),
     });
 
-    await expect(getLessonScores(client, [7001])).resolves.toEqual([
-      expect.objectContaining({ score: null, status: "unmarked" }),
+    await expect(listGrades(client, 100, [])).resolves.toEqual([
+      expect.objectContaining({ grade: null, status: "ungraded" }),
     ]);
   });
 
   it("omits the maximum when Ed's totals are unknown", async () => {
-    const client = makeScoreClient({
+    const client = makeGradeClient({
       fetchLessonMarkingStatus: vi.fn().mockResolvedValue({
         mark: 7.5,
         slideTotals: [],
@@ -369,25 +393,25 @@ describe("getLessonScores", () => {
       }),
     });
 
-    await expect(getLessonScores(client, [7001])).resolves.toEqual([
-      expect.objectContaining({ maxScore: null, score: 7.5, status: "graded" }),
+    await expect(listGrades(client, 100, [])).resolves.toEqual([
+      expect.objectContaining({ grade: 7.5, max: null, status: "graded" }),
     ]);
   });
 
   it("reports a staff override, including zero, in place of the calculated mark", async () => {
     for (const markOverride of [9, 0]) {
-      const client = makeScoreClient({
+      const client = makeGradeClient({
         fetchLessonAttempts: vi.fn().mockResolvedValue({ attempts: [{ ...attempt, markOverride }], finalId: 32 }),
       });
 
-      await expect(getLessonScores(client, [7001])).resolves.toEqual([
-        expect.objectContaining({ maxScore: 10, score: markOverride, status: "graded" }),
+      await expect(listGrades(client, 100, [])).resolves.toEqual([
+        expect.objectContaining({ grade: markOverride, max: 10, status: "graded" }),
       ]);
     }
   });
 
   it("reports an override even when Ed has no calculated mark", async () => {
-    const client = makeScoreClient({
+    const client = makeGradeClient({
       fetchLessonAttempts: vi.fn().mockResolvedValue({ attempts: [{ ...attempt, markOverride: 9 }], finalId: 32 }),
       fetchLessonMarkingStatus: vi.fn().mockResolvedValue({
         mark: null,
@@ -397,39 +421,66 @@ describe("getLessonScores", () => {
       }),
     });
 
-    await expect(getLessonScores(client, [7001])).resolves.toEqual([
-      expect.objectContaining({ score: 9, status: "graded" }),
+    await expect(listGrades(client, 100, [])).resolves.toEqual([
+      expect.objectContaining({ grade: 9, status: "graded" }),
     ]);
   });
 
   it("keeps an override hidden until results are released", async () => {
-    const client = makeScoreClient({
+    const client = makeGradeClient({
       fetchLessonAttempts: vi.fn().mockResolvedValue({ attempts: [{ ...attempt, markOverride: 9 }], finalId: 32 }),
       fetchLessonMarkingStatus: vi.fn().mockRejectedValue(
         new EdApiError("api", 403, "Results are not released", "results_unreleased")
       ),
     });
 
-    await expect(getLessonScores(client, [7001])).resolves.toEqual([
-      expect.objectContaining({ score: null, status: "unreleased" }),
+    await expect(listGrades(client, 100, [])).resolves.toEqual([
+      expect.objectContaining({ grade: null, status: "unreleased" }),
     ]);
   });
 
-  it("keeps other API errors", async () => {
-    const client = makeScoreClient({
-      fetchLessonMarkingStatus: vi.fn().mockRejectedValue(new EdApiError("api", 403, "Forbidden", "forbidden")),
-    });
+  it("reports one failing lesson as unavailable and keeps going", async () => {
+    const client = makeGradeClient({
+      fetchLessonAttempts: vi.fn()
+        .mockRejectedValueOnce(new EdApiError("api", 403, "Ed API error (HTTP 403): Forbidden", "forbidden"))
+        .mockResolvedValueOnce({ attempts: [{ ...attempt, id: 33, lessonId: 7002 }], finalId: 33 }),
+    }, [assignment, makeLesson({ id: 7002, kind: "attempt", title: "Assignment 2" })]);
 
-    await expect(getLessonScores(client, [7001])).rejects.toThrow("Forbidden");
+    await expect(listGrades(client, 100, [])).resolves.toEqual([
+      {
+        error: "Ed API error (HTTP 403): Forbidden",
+        grade: null,
+        lessonId: 7001,
+        max: null,
+        status: "unavailable",
+        submittedAt: "",
+        title: "Assignment 1",
+      },
+      expect.objectContaining({ lessonId: 7002, status: "graded" }),
+    ]);
   });
 
-  it("rejects a final submission or result that belongs to someone else", async () => {
-    const foreignAttempt = makeScoreClient({
+  it("fails the whole listing when the token is rejected", async () => {
+    const client = makeGradeClient({
+      fetchLessonAttempts: vi.fn().mockRejectedValue(new EdAuthExpiredError(401, "Authentication failed")),
+    });
+
+    await expect(listGrades(client, 100, [])).rejects.toBeInstanceOf(EdAuthExpiredError);
+  });
+
+  it("fails the whole listing when Ed cannot be reached", async () => {
+    const client = makeGradeClient({
+      fetchLessonAttempts: vi.fn().mockRejectedValue(new EdApiError("network", 0, "Could not reach Ed")),
+    });
+
+    await expect(listGrades(client, 100, [])).rejects.toThrow("Could not reach Ed");
+  });
+
+  it("never reports a submission or result that belongs to someone else", async () => {
+    const foreignAttempt = makeGradeClient({
       fetchLessonAttempts: vi.fn().mockResolvedValue({ attempts: [{ ...attempt, userId: 999 }], finalId: 32 }),
     });
-    await expect(getLessonScores(foreignAttempt, [7001])).rejects.toThrow("does not belong to you");
-
-    const foreignResult = makeScoreClient({
+    const foreignResult = makeGradeClient({
       fetchLessonMarkingStatus: vi.fn().mockResolvedValue({
         mark: 7.5,
         slideTotals: [10],
@@ -437,6 +488,11 @@ describe("getLessonScores", () => {
         userId: 999,
       }),
     });
-    await expect(getLessonScores(foreignResult, [7001])).rejects.toThrow("does not belong to you");
+
+    for (const client of [foreignAttempt, foreignResult]) {
+      const [grade] = await listGrades(client, 100, []);
+      expect(grade).toMatchObject({ grade: null, status: "unavailable" });
+      expect(grade?.error).toMatch(/does not belong to you/);
+    }
   });
 });
