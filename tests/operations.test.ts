@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { EdApiError, EdAuthExpiredError, type EdClient } from "../src/ed/client.js";
 import type { Lesson, Thread } from "../src/ed/models.js";
-import { listGrades, listLessons, listThreads, resolveCourseId } from "../src/ed/operations.js";
+import { GRADE_CONCURRENCY, listGrades, listLessons, listThreads, resolveCourseId } from "../src/ed/operations.js";
 import { makeThread } from "./support/threads.js";
 
 function makeLesson(overrides: Partial<Lesson>): Lesson {
@@ -29,6 +29,7 @@ function makeLesson(overrides: Partial<Lesson>): Lesson {
     dueAt: "",
     lockedAt: "",
     solutionsAt: "",
+    submittedAt: "",
     createdAt: "",
     updatedAt: "",
     ...overrides,
@@ -273,7 +274,8 @@ describe("resolveCourseId", () => {
 
 describe("listGrades", () => {
   const attempt = { id: 32, lessonId: 7001, markOverride: null, submittedAt: "2026-03-02T10:00:00+11:00", userId: 12345 };
-  const assignment = makeLesson({ id: 7001, kind: "attempt", moduleName: "Assessments", title: "Assignment 1" });
+  const submittedAt = "2026-03-02T10:00:00+11:00";
+  const assignment = makeLesson({ id: 7001, kind: "attempt", moduleName: "Assessments", submittedAt, title: "Assignment 1" });
 
   function makeGradeClient(
     overrides: Partial<Record<keyof EdClient, unknown>> = {},
@@ -315,7 +317,7 @@ describe("listGrades", () => {
   it("only asks Ed about submission lessons that match every query", async () => {
     const client = makeGradeClient({}, [
       assignment,
-      makeLesson({ id: 7002, kind: "attempt", moduleName: "Assessments", title: "Assignment 2" }),
+      makeLesson({ id: 7002, kind: "attempt", moduleName: "Assessments", submittedAt, title: "Assignment 2" }),
       makeLesson({ id: 7003, kind: "content", moduleName: "Week 1", title: "Assignment 1 walkthrough" }),
     ]);
 
@@ -444,7 +446,7 @@ describe("listGrades", () => {
       fetchLessonAttempts: vi.fn()
         .mockRejectedValueOnce(new EdApiError("api", 403, "Ed API error (HTTP 403): Forbidden", "forbidden"))
         .mockResolvedValueOnce({ attempts: [{ ...attempt, id: 33, lessonId: 7002 }], finalId: 33 }),
-    }, [assignment, makeLesson({ id: 7002, kind: "attempt", title: "Assignment 2" })]);
+    }, [assignment, makeLesson({ id: 7002, kind: "attempt", submittedAt, title: "Assignment 2" })]);
 
     await expect(listGrades(client, 100, [])).resolves.toEqual([
       {
@@ -474,6 +476,46 @@ describe("listGrades", () => {
     });
 
     await expect(listGrades(client, 100, [])).rejects.toThrow("Could not reach Ed");
+  });
+
+  it("goes straight to not_submitted for a lesson the lesson list says you never submitted", async () => {
+    const client = makeGradeClient({}, [
+      makeLesson({ id: 7002, kind: "attempt", moduleName: "Assessments", title: "Quiz 1" }),
+    ]);
+
+    await expect(listGrades(client, 100, [])).resolves.toEqual([{
+      grade: null,
+      lessonId: 7002,
+      max: null,
+      status: "not_submitted",
+      submittedAt: "",
+      title: "Quiz 1",
+    }]);
+    expect(client.fetchLessonAttempts).not.toHaveBeenCalled();
+    expect(client.fetchLessonMarkingStatus).not.toHaveBeenCalled();
+  });
+
+  it("asks Ed about a few lessons at once and keeps the unit's order", async () => {
+    const lessons = [1, 2, 3, 4, 5, 6].map((n) =>
+      makeLesson({ id: 7000 + n, kind: "attempt", moduleName: "Assessments", submittedAt, title: `Quiz ${n}` })
+    );
+    let inFlight = 0;
+    let most = 0;
+    const fetchLessonAttempts = vi.fn(async (lessonId: number) => {
+      inFlight += 1;
+      most = Math.max(most, inFlight);
+      // Later lessons answer first, so order can only come from the lesson list.
+      await new Promise((resolve) => setTimeout(resolve, (7010 - lessonId) * 2));
+      inFlight -= 1;
+      return { attempts: [{ ...attempt, id: lessonId, lessonId }], finalId: lessonId };
+    });
+    const client = makeGradeClient({ fetchLessonAttempts }, lessons);
+
+    const grades = await listGrades(client, 100, []);
+
+    expect(grades.map((grade) => grade.lessonId)).toEqual([7001, 7002, 7003, 7004, 7005, 7006]);
+    expect(most).toBeGreaterThan(1);
+    expect(most).toBeLessThanOrEqual(GRADE_CONCURRENCY);
   });
 
   it("never reports a submission or result that belongs to someone else", async () => {

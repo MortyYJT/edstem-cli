@@ -688,6 +688,7 @@ function parseLesson(
       asString(data.effective_solutions_at) || asString(data.solutions_at),
     state: asString(data.state),
     status: asString(data.status),
+    submittedAt: asString(data.submitted_at),
     title: asString(data.title),
     type: asString(data.type),
     updatedAt: asString(data.updated_at)

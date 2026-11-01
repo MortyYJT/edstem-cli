@@ -75,6 +75,8 @@ export interface Lesson {
   dueAt: string;
   lockedAt: string;
   solutionsAt: string;
+  /** When the signed-in user last submitted, from the lesson list; empty if they never did. */
+  submittedAt: string;
   createdAt: string;
   updatedAt: string;
 }

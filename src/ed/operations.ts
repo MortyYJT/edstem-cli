@@ -467,20 +467,48 @@ export async function listGrades(
   if (lessons.length === 0) return [];
 
   const { user } = await client.fetchUser();
-  const grades: Grade[] = [];
-  for (const lesson of lessons) {
+  return mapInOrder(lessons, GRADE_CONCURRENCY, async (lesson): Promise<Grade> => {
     const empty = { grade: null, lessonId: lesson.id, max: null, submittedAt: "", title: lesson.title };
+    // The lesson list already carries the user's own submission time, so a lesson they never
+    // submitted needs no request. Submitted ones still do: only the attempts carry mark_override,
+    // and the list's latest attempt may not be the final submission after a lesson is reopened.
+    if (!lesson.submittedAt) return { ...empty, status: "not_submitted" };
     try {
-      grades.push({ ...empty, ...await getGrade(client, lesson.id, user.id) });
+      return { ...empty, ...await getGrade(client, lesson.id, user.id) };
     } catch (error) {
       // A rejected token or a lost connection fails every lesson, so stop instead.
       if (error instanceof EdAuthExpiredError || (error instanceof EdApiError && error.kind === "network")) {
         throw error;
       }
-      grades.push({ ...empty, error: error instanceof Error ? error.message : String(error), status: "unavailable" });
+      return { ...empty, error: error instanceof Error ? error.message : String(error), status: "unavailable" };
     }
-  }
-  return grades;
+  });
+}
+
+/** How many lessons `listGrades` asks Ed about at once. */
+export const GRADE_CONCURRENCY = 3;
+
+/**
+ * Map `items` with at most `limit` calls in flight, keeping the input order. The first rejection
+ * rejects the whole map and no further items are started.
+ */
+async function mapInOrder<T, R>(items: T[], limit: number, map: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  let failed = false;
+  const worker = async (): Promise<void> => {
+    while (!failed && next < items.length) {
+      const index = next++;
+      try {
+        results[index] = await map(items[index] as T);
+      } catch (error) {
+        failed = true;
+        throw error;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }
 
 async function getGrade(

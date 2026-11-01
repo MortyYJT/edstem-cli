@@ -515,8 +515,8 @@ describe("CLI", () => {
     const { fetch, runtime, stdout } = makeRuntime(200, false, fixture("user_info"), {}, {
       "/api/courses/100/lessons": {
         lessons: [
-          { course_id: 100, id: 7001, kind: "attempt", module_id: 1, title: "Assignment 1", type: "general" },
-          { course_id: 100, id: 7002, kind: "attempt", module_id: 1, title: "Assignment 2", type: "general" },
+          { course_id: 100, id: 7001, kind: "attempt", module_id: 1, submitted_at: "2026-03-02T10:00:00.5+11:00", title: "Assignment 1", type: "general" },
+          { course_id: 100, id: 7002, kind: "attempt", module_id: 1, submitted_at: null, title: "Assignment 2", type: "general" },
           { course_id: 100, id: 7003, kind: "content", module_id: 1, title: "Workshop", type: "general" },
         ],
         modules: [{ course_id: 100, id: 1, name: "Week 1" }],
@@ -558,8 +558,8 @@ describe("CLI", () => {
       const { fetch, runtime, stdout } = makeRuntime(200, true, fixture("user_info"), {}, {
         "/api/courses/100/lessons": {
           lessons: [
-            { course_id: 100, id: 7001, kind: "attempt", module_id: 1, title: "Assignment 1", type: "general" },
-            { course_id: 100, id: 7002, kind: "attempt", module_id: 1, title: "Assignment 2", type: "general" },
+            { course_id: 100, id: 7001, kind: "attempt", module_id: 1, submitted_at: "2026-03-02T10:00:00+11:00", title: "Assignment 1", type: "general" },
+            { course_id: 100, id: 7002, kind: "attempt", module_id: 1, submitted_at: "2026-03-02T10:00:00+11:00", title: "Assignment 2", type: "general" },
           ],
           modules: [{ course_id: 100, id: 1, name: "Week 1" }],
         },
